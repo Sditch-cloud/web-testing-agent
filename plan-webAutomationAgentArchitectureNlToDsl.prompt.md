@@ -15,6 +15,7 @@
 10. 阶段八（端到端验收，D14-D15）: 跑通“自然语言测试用例 -> DSL -> 执行 -> 验证 -> 报告”链路，验证中断恢复与重复执行稳定性。*依赖步骤8-9*
 
 **Relevant files**
+仓库地址: https://github.com/zackautocracy/claude-code.git
 - ~/claude-code-main/src/QueryEngine.ts — 参考会话生命周期与 submitMessage 编排入口
 - ~/claude-code-main/src/query.ts — 参考 queryLoop 状态机与轮次推进
 - ~/claude-code-main/src/services/tools/toolOrchestration.ts — 参考并发/串行工具分区与执行策略
