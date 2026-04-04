@@ -23,6 +23,7 @@ import type {
 
 export type CompilerConfig = {
   apiKey: string
+  baseURL?: string
   model?: string
   maxTokens?: number
   /** If provided, hints are injected into the system prompt */
@@ -164,7 +165,7 @@ export class TestCaseCompiler {
   private readonly hints: string[]
 
   constructor(config: CompilerConfig) {
-    this.client = new OpenAI({ apiKey: config.apiKey })
+    this.client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })
     this.model = config.model ?? 'gpt-4o'
     this.maxTokens = config.maxTokens ?? 4096
     this.hints = config.hints ?? []
