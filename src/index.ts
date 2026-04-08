@@ -10,6 +10,7 @@ import { chromium } from "playwright";
 import { TestCaseCompiler } from "./orchestrator/TestCaseCompiler.js";
 import { DslValidator } from "./orchestrator/DslValidator.js";
 import { MacroExpander } from "./orchestrator/MacroExpander.js";
+import { resolveNlInput } from "./orchestrator/NlInputLoader.js";
 import { executeTestCase } from "./orchestrator/testLoop.js";
 import { PlaywrightElementResolver } from "./resolver/ElementResolver.js";
 import { DslSnapshotStore } from "./store/DslSnapshotStore.js";
@@ -51,6 +52,8 @@ function checkTokenBudget(maxTokens: number): void {
 export type RunOptions = {
   /** Natural language test description */
   nlInput: string;
+  /** Markdown file path for test case input */
+  caseFilePath?: string;
   /** Resume from a previous run ID (interrupt recovery) */
   resumeRunId?: string;
   /** Whether to run in headless mode */
@@ -58,7 +61,8 @@ export type RunOptions = {
 };
 
 export async function run(options: RunOptions): Promise<void> {
-  const { nlInput, resumeRunId, headless = true } = options;
+  const { nlInput, caseFilePath, resumeRunId, headless = true } = options;
+  const resolvedNlInput = await resolveNlInput(nlInput, caseFilePath);
 
   const dslStore = new DslSnapshotStore(STORAGE_DIR);
   const sessionStore = new SessionStore(STORAGE_DIR);
@@ -106,7 +110,7 @@ export async function run(options: RunOptions): Promise<void> {
       maxTokens: COMPILE_MAX_TOKENS,
     });
 
-    const result = await compiler.compile(nlInput);
+    const result = await compiler.compile(resolvedNlInput);
 
     if (!result.dsl || result.report.errors.length > 0) {
       console.error("[ERROR] Compilation failed:");
@@ -148,7 +152,7 @@ export async function run(options: RunOptions): Promise<void> {
     dsl = validator.normalize(expandedDsl);
 
     // Persist DSL snapshot
-    const revision = await dslStore.save(nlInput, dsl);
+    const revision = await dslStore.save(resolvedNlInput, dsl);
     console.log(`[INFO] DSL saved (v${revision.version}): ${dsl.id}`);
   }
 
@@ -209,20 +213,29 @@ if (
 ) {
   const args = process.argv.slice(2);
   const resumeFlag = args.indexOf("--resume");
+  const caseFlag = args.indexOf("--case");
 
   let resumeRunId: string | undefined;
+  let caseFilePath: string | undefined;
   let nlInput: string;
+
+  const filteredArgs = args.filter((_, i) => {
+    if (resumeFlag >= 0 && (i === resumeFlag || i === resumeFlag + 1)) return false;
+    if (caseFlag >= 0 && (i === caseFlag || i === caseFlag + 1)) return false;
+    return true;
+  });
 
   if (resumeFlag >= 0) {
     resumeRunId = args[resumeFlag + 1];
-    nlInput = args
-      .filter((_, i) => i !== resumeFlag && i !== resumeFlag + 1)
-      .join(" ");
-  } else {
-    nlInput = args.join(" ");
   }
 
-  run({ nlInput: nlInput || "", resumeRunId }).catch((err) => {
+  if (caseFlag >= 0) {
+    caseFilePath = args[caseFlag + 1];
+  }
+
+  nlInput = filteredArgs.join(" ");
+
+  run({ nlInput: nlInput || "", caseFilePath, resumeRunId }).catch((err) => {
     console.error("[FATAL]", err);
     process.exit(1);
   });

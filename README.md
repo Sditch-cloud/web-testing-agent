@@ -218,6 +218,12 @@ npx playwright install chromium
 
 ```bash
 npx tsx src/index.ts "<自然语言测试描述>"
+
+# 从 Markdown 文件读取测试用例
+npx tsx src/index.ts --case nl-case/login-test.md
+
+# 也支持直接把 .md 路径作为输入参数
+npx tsx src/index.ts nl-case/login-test.md
 ```
 
 **示例：**
