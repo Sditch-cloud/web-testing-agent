@@ -14,7 +14,7 @@ export type Message = {
 export type CompilationRequest = {
   /** Natural language test case description */
   nl_input: string
-  /** Additional context hints (e.g. known selectors, base URL) */
+  /** Additional context hints (e.g. known labels, semantic keys, base URL) */
   hints?: string[]
 }
 

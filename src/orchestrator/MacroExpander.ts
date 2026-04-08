@@ -22,7 +22,7 @@ type MacroRule = {
 
 const LOGIN_MACRO: MacroRule = {
   matches(step) {
-    if (step.action !== 'fill') return false
+    if (step.action !== 'input') return false
     const desc = (step.description ?? '').toLowerCase()
     return desc.includes('login') || desc.includes('登录') || desc.includes('sign in')
   },
@@ -31,27 +31,48 @@ const LOGIN_MACRO: MacroRule = {
       {
         step_id: '__macro__',
         action: 'navigate',
-        target: dsl.url,
+        target: {
+          key: 'login_page',
+          type: 'page',
+          hints: ['Login Page'],
+          fallback: [dsl.url],
+        },
+        value: dsl.url,
         description: 'Navigate to login page',
       },
       {
         step_id: '__macro__',
-        action: 'fill',
-        target: step.target ?? 'input[type="text"], input[name="username"], #username',
+        action: 'input',
+        target: {
+          key: step.target.key || 'username',
+          type: 'input',
+          hints: step.target.hints ?? ['Username', 'Email'],
+          fallback: step.target.fallback,
+        },
         value: step.value,
         description: 'Fill username',
       },
       {
         step_id: '__macro__',
-        action: 'fill',
-        target: 'input[type="password"], input[name="password"], #password',
+        action: 'input',
+        target: {
+          key: 'password',
+          type: 'input',
+          hints: ['Password'],
+          fallback: ['input[type="password"]', 'input[name="password"]', '#password'],
+        },
         value: '',
         description: 'Fill password (value unknown — check compile warnings)',
       },
       {
         step_id: '__macro__',
         action: 'click',
-        target: 'button[type="submit"], button:has-text("Login"), button:has-text("登录")',
+        target: {
+          key: 'login_submit',
+          type: 'button',
+          hints: ['Login', 'Sign In', '登录'],
+          fallback: ['button[type="submit"]'],
+        },
         description: 'Click submit / login button',
       },
     ]

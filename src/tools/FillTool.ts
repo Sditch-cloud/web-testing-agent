@@ -7,8 +7,16 @@ import { z } from 'zod'
 import type { Page } from 'playwright'
 import type { Tool, ToolResult } from './Tool.js'
 
+const CandidateSchema = z.object({
+  id: z.string(),
+  strategy: z.enum(['memory', 'label', 'role', 'text', 'fallback']),
+  value: z.string().min(1),
+  score: z.number(),
+})
+
 export const FillInputSchema = z.object({
-  selector: z.string().min(1),
+  candidate: CandidateSchema,
+  target_type: z.enum(['input', 'button', 'link', 'page', 'text']),
   value: z.string(),
   timeout_ms: z.number().optional().default(10_000),
 })
@@ -17,7 +25,7 @@ export type FillInput = z.infer<typeof FillInputSchema>
 
 export class FillTool implements Tool<FillInput> {
   readonly name = 'fill'
-  readonly description = 'Fill a text input field by CSS selector'
+  readonly description = 'Fill a text input field resolved from semantic target candidates'
   readonly inputSchema = FillInputSchema
 
   constructor(private readonly page: Page) {}
@@ -31,14 +39,14 @@ export class FillTool implements Tool<FillInput> {
     try {
       if (signal.aborted) throw new Error('Aborted before fill')
 
-      const locator = this.page.locator(input.selector).first()
+      const locator = this.resolveLocator(input)
       await locator.waitFor({ state: 'visible', timeout: input.timeout_ms })
       await locator.fill(input.value, { timeout: input.timeout_ms })
 
       return {
         success: true,
         evidence: {
-          selector: input.selector,
+          candidate: input.candidate,
           filled_value: input.value,
         },
         duration_ms: Date.now() - startTime,
@@ -46,10 +54,36 @@ export class FillTool implements Tool<FillInput> {
     } catch (err) {
       return {
         success: false,
-        evidence: { selector: input.selector },
+        evidence: { candidate: input.candidate },
         error: err instanceof Error ? err.message : String(err),
         duration_ms: Date.now() - startTime,
       }
+    }
+  }
+
+  private resolveLocator(input: FillInput) {
+    const role = input.target_type === 'input'
+      ? 'textbox'
+      : input.target_type === 'button'
+        ? 'button'
+        : input.target_type === 'link'
+          ? 'link'
+          : null
+
+    switch (input.candidate.strategy) {
+      case 'label':
+        return this.page.getByLabel(input.candidate.value).first()
+      case 'role':
+        if (role) {
+          return this.page.getByRole(role, { name: input.candidate.value }).first()
+        }
+        return this.page.getByText(input.candidate.value).first()
+      case 'text':
+        return this.page.getByText(input.candidate.value).first()
+      case 'memory':
+      case 'fallback':
+      default:
+        return this.page.locator(input.candidate.value).first()
     }
   }
 }

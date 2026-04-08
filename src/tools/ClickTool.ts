@@ -7,8 +7,16 @@ import { z } from 'zod'
 import type { Page } from 'playwright'
 import type { Tool, ToolResult } from './Tool.js'
 
+const CandidateSchema = z.object({
+  id: z.string(),
+  strategy: z.enum(['memory', 'label', 'role', 'text', 'fallback']),
+  value: z.string().min(1),
+  score: z.number(),
+})
+
 export const ClickInputSchema = z.object({
-  selector: z.string().min(1),
+  candidate: CandidateSchema,
+  target_type: z.enum(['input', 'button', 'link', 'page', 'text']),
   timeout_ms: z.number().optional().default(10_000),
 })
 
@@ -16,7 +24,7 @@ export type ClickInput = z.infer<typeof ClickInputSchema>
 
 export class ClickTool implements Tool<ClickInput> {
   readonly name = 'click'
-  readonly description = 'Click a DOM element identified by CSS selector'
+  readonly description = 'Click a DOM element resolved from semantic target candidates'
   readonly inputSchema = ClickInputSchema
 
   constructor(private readonly page: Page) {}
@@ -30,7 +38,7 @@ export class ClickTool implements Tool<ClickInput> {
     try {
       if (signal.aborted) throw new Error('Aborted before click')
 
-      const locator = this.page.locator(input.selector).first()
+      const locator = this.resolveLocator(input)
       await locator.waitFor({ state: 'visible', timeout: input.timeout_ms })
 
       const boundingBox = await locator.boundingBox()
@@ -41,7 +49,7 @@ export class ClickTool implements Tool<ClickInput> {
       return {
         success: true,
         evidence: {
-          selector: input.selector,
+          candidate: input.candidate,
           element_text: elementText?.trim() ?? null,
           coordinates: boundingBox
             ? { x: Math.round(boundingBox.x + boundingBox.width / 2), y: Math.round(boundingBox.y + boundingBox.height / 2) }
@@ -52,10 +60,36 @@ export class ClickTool implements Tool<ClickInput> {
     } catch (err) {
       return {
         success: false,
-        evidence: { selector: input.selector },
+        evidence: { candidate: input.candidate },
         error: err instanceof Error ? err.message : String(err),
         duration_ms: Date.now() - startTime,
       }
+    }
+  }
+
+  private resolveLocator(input: ClickInput) {
+    const role = input.target_type === 'input'
+      ? 'textbox'
+      : input.target_type === 'button'
+        ? 'button'
+        : input.target_type === 'link'
+          ? 'link'
+          : null
+
+    switch (input.candidate.strategy) {
+      case 'label':
+        return this.page.getByLabel(input.candidate.value).first()
+      case 'role':
+        if (role) {
+          return this.page.getByRole(role, { name: input.candidate.value }).first()
+        }
+        return this.page.getByText(input.candidate.value).first()
+      case 'text':
+        return this.page.getByText(input.candidate.value).first()
+      case 'memory':
+      case 'fallback':
+      default:
+        return this.page.locator(input.candidate.value).first()
     }
   }
 }

@@ -17,8 +17,8 @@ describe('MacroExpander', () => {
     const dsl: TestCaseDsl = {
       ...baseDsl,
       steps: [
-        { step_id: 's1', action: 'navigate', target: 'https://example.com' },
-        { step_id: 's2', action: 'screenshot' },
+        { step_id: 's1', action: 'navigate', target: { key: 'home', type: 'page', fallback: ['https://example.com'] }, value: 'https://example.com' },
+        { step_id: 's2', action: 'screenshot', target: { key: 'home', type: 'page' } },
       ],
     }
     const { dsl: expanded, expandedCount } = expander.expand(dsl)
@@ -32,7 +32,7 @@ describe('MacroExpander', () => {
     const dsl: TestCaseDsl = {
       ...baseDsl,
       steps: [
-        { step_id: 's1', action: 'fill', target: '#username', value: 'admin', description: 'Login to the app' },
+        { step_id: 's1', action: 'input', target: { key: 'username', type: 'input', hints: ['Username'] }, value: 'admin', description: 'Login to the app' },
       ],
     }
     const { dsl: expanded, expandedCount } = expander.expand(dsl)
@@ -45,7 +45,7 @@ describe('MacroExpander', () => {
     // Check it includes navigate, fill, click actions
     const actions = expanded.steps.map(s => s.action)
     expect(actions).toContain('navigate')
-    expect(actions).toContain('fill')
+    expect(actions).toContain('input')
     expect(actions).toContain('click')
   })
 })

@@ -15,6 +15,7 @@
 
 import type { Page } from 'playwright'
 import { BrowserToolExecutor } from '../executor/BrowserToolExecutor.js'
+import type { ElementResolver, ResolverMemory } from '../resolver/types.js'
 import { SessionStore } from '../store/SessionStore.js'
 import type { TestCaseDsl } from '../types/TestDsl.js'
 import {
@@ -39,6 +40,10 @@ export type TestLoopParams = {
   screenshotDir?: string
   /** Resume from a partially executed state (interrupt recovery) */
   resumeFrom?: TestRunState
+  /** Semantic resolver implementation */
+  resolver?: ElementResolver
+  /** Resolver self-healing memory implementation */
+  resolverMemory?: ResolverMemory
 }
 
 // ── Loop state ────────────────────────────────────────────────────────────────
@@ -118,6 +123,8 @@ export async function* executeTestCase(
     globalTimeoutMs = 120_000,
     screenshotDir = './data/screenshots',
     resumeFrom,
+    resolver,
+    resolverMemory,
   } = params
 
   const startedAt = resumeFrom?.started_at ?? new Date().toISOString()
@@ -133,7 +140,7 @@ export async function* executeTestCase(
     globalDeadline: Date.now() + globalTimeoutMs,
   }
 
-  const executor = new BrowserToolExecutor(page, { maxRetries, screenshotDir })
+  const executor = new BrowserToolExecutor(page, { maxRetries, screenshotDir, resolver, resolverMemory })
 
   // Build and persist initial run state
   let runState: TestRunState = {

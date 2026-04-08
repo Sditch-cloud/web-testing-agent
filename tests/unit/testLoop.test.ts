@@ -35,8 +35,8 @@ const simpleDsl: TestCaseDsl = {
   name: 'Simple Navigation Test',
   url: 'https://example.com',
   steps: [
-    { step_id: 's1', action: 'navigate', target: 'https://example.com' },
-    { step_id: 's2', action: 'screenshot' },
+    { step_id: 's1', action: 'navigate', target: { key: 'home_page', type: 'page', fallback: ['https://example.com'] }, value: 'https://example.com' },
+    { step_id: 's2', action: 'screenshot', target: { key: 'home_page', type: 'page' } },
   ],
   compile_report: {
     confidence: 0.95,

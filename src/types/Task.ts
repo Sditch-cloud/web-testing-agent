@@ -38,6 +38,12 @@ export type StepArtifact = {
   success: boolean
   /** Tool-specific evidence (URL, selector, screenshot path, etc.) */
   evidence: Record<string, unknown>
+  /** Resolver candidates attempted in order */
+  attempted_candidates?: Array<{ strategy: string; value: string; score: number }>
+  /** Candidate that ultimately succeeded */
+  resolved_candidate?: { strategy: string; value: string; score: number }
+  /** Whether resolver memory was updated after success */
+  healing_applied?: boolean
   /** Error message if the step failed */
   error?: string
   /** How many attempts were made (1 = no retry) */

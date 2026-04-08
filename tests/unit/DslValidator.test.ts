@@ -7,12 +7,12 @@ const validDsl: TestCaseDsl = {
   name: 'Login Test',
   url: 'https://example.com/login',
   steps: [
-    { step_id: 's1', action: 'navigate', target: 'https://example.com/login', description: 'Open login page' },
-    { step_id: 's2', action: 'fill', target: '#username', value: 'admin', description: 'Fill username' },
-    { step_id: 's3', action: 'fill', target: '#password', value: 'secret', description: 'Fill password' },
-    { step_id: 's4', action: 'click', target: 'button[type="submit"]', description: 'Submit form' },
-    { step_id: 's5', action: 'assert', target: 'body', assertions: [{ type: 'text_contains', target: 'body', value: 'Welcome' }], description: 'Check welcome message' },
-    { step_id: 's6', action: 'screenshot', description: 'Final screenshot' },
+    { step_id: 's1', action: 'navigate', target: { key: 'login_page', type: 'page', hints: ['Login Page'], fallback: ['https://example.com/login'] }, value: 'https://example.com/login', description: 'Open login page' },
+    { step_id: 's2', action: 'input', target: { key: 'username', type: 'input', hints: ['Username', 'Email'] }, value: 'admin', description: 'Fill username' },
+    { step_id: 's3', action: 'input', target: { key: 'password', type: 'input', hints: ['Password'] }, value: 'secret', description: 'Fill password' },
+    { step_id: 's4', action: 'click', target: { key: 'login_submit', type: 'button', hints: ['Login', 'Sign In'] }, description: 'Submit form' },
+    { step_id: 's5', action: 'assert', target: { key: 'welcome_area', type: 'text', hints: ['Welcome'] }, assertions: [{ type: 'text_contains', target: { key: 'welcome_area', type: 'text', hints: ['Welcome'] }, value: 'Welcome' }], description: 'Check welcome message' },
+    { step_id: 's6', action: 'screenshot', target: { key: 'final_page', type: 'page' }, description: 'Final screenshot' },
   ],
   compile_report: { confidence: 0.95, warnings: [], errors: [], source_nl: 'Login test', compiled_at: new Date().toISOString() },
 }
@@ -51,38 +51,46 @@ describe('DslValidator', () => {
     expect(result.errors.some(e => e.code === 'DUPLICATE_STEP_ID')).toBe(true)
   })
 
-  it('rejects navigate step without target', () => {
-    const steps = [{ step_id: 's1', action: 'navigate' as const }]
+  it('rejects step with string target', () => {
+    const steps = [{ step_id: 's1', action: 'click' as const, target: '#username' as never }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
-    expect(result.errors.some(e => e.code === 'MISSING_TARGET')).toBe(true)
+    expect(result.errors.some(e => e.code === 'MISSING_TARGET_KEY')).toBe(true)
   })
 
-  it('rejects click step without target', () => {
-    const steps = [{ step_id: 's1', action: 'click' as const }]
+  it('rejects step with missing target.key', () => {
+    const steps = [{ step_id: 's1', action: 'click' as const, target: { key: '', type: 'button' } }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
-    expect(result.errors.some(e => e.code === 'MISSING_TARGET')).toBe(true)
+    expect(result.errors.some(e => e.code === 'MISSING_TARGET_KEY')).toBe(true)
   })
 
   it('rejects assert step without assertions', () => {
-    const steps = [{ step_id: 's1', action: 'assert' as const, target: 'body', assertions: [] }]
+    const steps = [{ step_id: 's1', action: 'assert' as const, target: { key: 'body', type: 'text' }, assertions: [] }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
     expect(result.errors.some(e => e.code === 'MISSING_ASSERTIONS')).toBe(true)
   })
 
   it('rejects assert step with text_contains but no value', () => {
-    const steps = [{ step_id: 's1', action: 'assert' as const, target: 'body', assertions: [{ type: 'text_contains' as const, target: 'body' }] }]
+    const steps = [{ step_id: 's1', action: 'assert' as const, target: { key: 'body', type: 'text' }, assertions: [{ type: 'text_contains' as const, target: { key: 'body', type: 'text' } }] }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
     expect(result.errors.some(e => e.code === 'MISSING_ASSERTION_VALUE')).toBe(true)
   })
 
   it('rejects unknown action type', () => {
-    const steps = [{ step_id: 's1', action: 'hover' as never, target: '#btn' }]
+    const steps = [{ step_id: 's1', action: 'hover' as never, target: { key: 'btn', type: 'button' } }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
     expect(result.errors.some(e => e.code === 'INVALID_ACTION')).toBe(true)
+  })
+
+  it('normalizes hints to string[]', () => {
+    const normalized = validator.normalize({
+      ...validDsl,
+      steps: [{ step_id: 's1', action: 'click', target: { key: 'submit', type: 'button', hints: [' Login ', 'Login', ''] } }],
+    })
+    expect(normalized.steps[0]!.target.hints).toEqual(['Login'])
   })
 })

@@ -11,7 +11,9 @@ import { TestCaseCompiler } from "./orchestrator/TestCaseCompiler.js";
 import { DslValidator } from "./orchestrator/DslValidator.js";
 import { MacroExpander } from "./orchestrator/MacroExpander.js";
 import { executeTestCase } from "./orchestrator/testLoop.js";
+import { PlaywrightElementResolver } from "./resolver/ElementResolver.js";
 import { DslSnapshotStore } from "./store/DslSnapshotStore.js";
+import { ResolverMemoryStore } from "./store/ResolverMemoryStore.js";
 import { SessionStore } from "./store/SessionStore.js";
 import type { TestRunState } from "./types/Task.js";
 
@@ -60,6 +62,8 @@ export async function run(options: RunOptions): Promise<void> {
 
   const dslStore = new DslSnapshotStore(STORAGE_DIR);
   const sessionStore = new SessionStore(STORAGE_DIR);
+  const resolverMemory = new ResolverMemoryStore(STORAGE_DIR);
+  const resolver = new PlaywrightElementResolver(resolverMemory);
 
   // ── Interrupt recovery ────────────────────────────────────────────────────
   let resumeState: TestRunState | undefined;
@@ -141,7 +145,7 @@ export async function run(options: RunOptions): Promise<void> {
       validation.warnings.forEach((w) => console.warn(`  [WARN] ${w.message}`));
     }
 
-    dsl = expandedDsl;
+    dsl = validator.normalize(expandedDsl);
 
     // Persist DSL snapshot
     const revision = await dslStore.save(nlInput, dsl);
@@ -149,50 +153,52 @@ export async function run(options: RunOptions): Promise<void> {
   }
 
   // ── Browser execution ─────────────────────────────────────────────────────
-  // const browser = await chromium.launch({ headless })
-  // const page = await browser.newPage()
+  const browser = await chromium.launch({ headless })
+  const page = await browser.newPage()
 
-  // console.log(`[INFO] Starting test: ${dsl.name} (${dsl.steps.length} steps)`)
+  console.log(`[INFO] Starting test: ${dsl.name} (${dsl.steps.length} steps)`)
 
-  // try {
-  //   const generator = executeTestCase({
-  //     dsl,
-  //     page,
-  //     sessionStore,
-  //     maxRetries: MAX_RETRIES,
-  //     globalTimeoutMs: GLOBAL_TIMEOUT_MS,
-  //     screenshotDir: `${STORAGE_DIR}/screenshots`,
-  //     resumeFrom: resumeState,
-  //   })
+  try {
+    const generator = executeTestCase({
+      dsl,
+      page,
+      sessionStore,
+      maxRetries: MAX_RETRIES,
+      globalTimeoutMs: GLOBAL_TIMEOUT_MS,
+      screenshotDir: `${STORAGE_DIR}/screenshots`,
+      resumeFrom: resumeState,
+      resolver,
+      resolverMemory,
+    })
 
-  //   // Stream step artifacts
-  //   let report = null
-  //   while (true) {
-  //     const { value, done } = await generator.next()
-  //     if (done) {
-  //       report = value
-  //       break
-  //     }
-  //     const artifact = value
-  //     const icon = artifact.success ? '✅' : artifact.transition === 'skip' ? '⏭️' : '❌'
-  //     console.log(`  ${icon} ${artifact.step_id} (${artifact.tool_name}) — ${artifact.transition} [${artifact.attempt_count} attempt(s)]`)
-  //     if (artifact.error) console.log(`     Error: ${artifact.error}`)
-  //   }
+    // Stream step artifacts
+    let report = null
+    while (true) {
+      const { value, done } = await generator.next()
+      if (done) {
+        report = value
+        break
+      }
+      const artifact = value
+      const icon = artifact.success ? '✅' : artifact.transition === 'skip' ? '⏭️' : '❌'
+      console.log(`  ${icon} ${artifact.step_id} (${artifact.tool_name}) — ${artifact.transition} [${artifact.attempt_count} attempt(s)]`)
+      if (artifact.error) console.log(`     Error: ${artifact.error}`)
+    }
 
-  //   if (report) {
-  //     console.log('\n' + report.summary)
+    if (report) {
+      console.log('\n' + report.summary)
 
-  //     // Write JSON report
-  //     const { writeFile, mkdir } = await import('node:fs/promises')
-  //     const reportsDir = `${STORAGE_DIR}/reports`
-  //     await mkdir(reportsDir, { recursive: true })
-  //     const reportPath = `${reportsDir}/${report.run_id}.json`
-  //     await writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8')
-  //     console.log(`\n[INFO] Report saved: ${reportPath}`)
-  //   }
-  // } finally {
-  //   await browser.close()
-  // }
+      // Write JSON report
+      const { writeFile, mkdir } = await import('node:fs/promises')
+      const reportsDir = `${STORAGE_DIR}/reports`
+      await mkdir(reportsDir, { recursive: true })
+      const reportPath = `${reportsDir}/${report.run_id}.json`
+      await writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8')
+      console.log(`\n[INFO] Report saved: ${reportPath}`)
+    }
+  } finally {
+    await browser.close()
+  }
 }
 
 // ── CLI entry ─────────────────────────────────────────────────────────────────

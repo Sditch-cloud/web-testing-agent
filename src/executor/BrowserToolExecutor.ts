@@ -1,37 +1,40 @@
 /**
  * BrowserToolExecutor — serial tool executor for browser automation.
  *
- * Adapted from the claude-code reference StreamingToolExecutor, simplified:
- * - Pure serial execution (no concurrent branch — browser is shared state)
- * - Per-step AbortSignal check before every tool call
- * - Promise.race() timeout wrapper
- * - Retry logic: retry_count < maxRetries → retry, otherwise → skip/fail_fast
- * - Results bound to step_id and returned as StepArtifact[]
- *
- * Key difference from reference: no streaming, no concurrency partitioning.
- * We trade the generality for simplicity appropriate for a test runner.
+ * Semantic execution flow:
+ * 1. Resolve semantic target into Top-K candidates
+ * 2. Try candidates sequentially
+ * 3. Record successful candidate into resolver memory
  */
 
+import type { Page } from 'playwright'
 import type { Tool } from '../tools/Tool.js'
-import type { StepDsl, ActionType } from '../types/TestDsl.js'
-import type { StepArtifact, StepTransition } from '../types/Task.js'
 import { NavigateTool } from '../tools/NavigateTool.js'
 import { ClickTool } from '../tools/ClickTool.js'
 import { FillTool } from '../tools/FillTool.js'
 import { ScreenshotTool } from '../tools/ScreenshotTool.js'
+import type { ActionType, AssertionDsl, StepDsl } from '../types/TestDsl.js'
+import type { StepArtifact, StepTransition } from '../types/Task.js'
+import {
+  PlaywrightElementResolver,
+  inferUrlFromTarget,
+  isResolverAction,
+  resolvePressKey,
+} from '../resolver/ElementResolver.js'
+import type { Candidate, ElementResolver, ResolverMemory } from '../resolver/types.js'
 
 export type ExecutorConfig = {
   maxRetries?: number
   defaultTimeoutMs?: number
   screenshotDir?: string
+  resolver?: ElementResolver
+  resolverMemory?: ResolverMemory
 }
 
 export type StepExecutionResult = {
   artifact: StepArtifact
   transition: StepTransition
 }
-
-// ── Error classification ───────────────────────────────────────────────────────
 
 type ErrorCategory = 'element_not_found' | 'navigation_failed' | 'assertion_failed' | 'timeout' | 'aborted' | 'unknown'
 
@@ -45,62 +48,18 @@ function classifyError(error: string): ErrorCategory {
   return 'unknown'
 }
 
-/** Retryable error categories — fail_fast otherwise */
 const RETRYABLE_ERRORS: ErrorCategory[] = ['element_not_found', 'timeout', 'unknown']
 
 function isRetryable(error: string): boolean {
   return RETRYABLE_ERRORS.includes(classifyError(error))
 }
 
-// ── Assertion executor ────────────────────────────────────────────────────────
-
-import type { Page } from 'playwright'
-import type { AssertionDsl } from '../types/TestDsl.js'
-
-async function runAssertions(
-  page: Page,
-  assertions: AssertionDsl[],
-  timeoutMs: number,
-): Promise<{ passed: boolean; error?: string }> {
-  for (const assertion of assertions) {
-    try {
-      switch (assertion.type) {
-        case 'text_contains': {
-          const content = await page.locator(assertion.target).textContent({ timeout: timeoutMs })
-          if (!content?.includes(assertion.value ?? '')) {
-            return { passed: false, error: `text_contains: "${assertion.value}" not found in "${content}"` }
-          }
-          break
-        }
-        case 'url_matches': {
-          const currentUrl = page.url()
-          if (!currentUrl.includes(assertion.value ?? '')) {
-            return { passed: false, error: `url_matches: "${assertion.value}" not found in URL "${currentUrl}"` }
-          }
-          break
-        }
-        case 'element_visible': {
-          await page.locator(assertion.target).waitFor({ state: 'visible', timeout: timeoutMs })
-          break
-        }
-        case 'element_not_visible': {
-          await page.locator(assertion.target).waitFor({ state: 'hidden', timeout: timeoutMs })
-          break
-        }
-      }
-    } catch (err) {
-      return { passed: false, error: `assertion_failed: ${err instanceof Error ? err.message : String(err)}` }
-    }
-  }
-  return { passed: true }
-}
-
-// ── Browser tool executor ─────────────────────────────────────────────────────
-
 export class BrowserToolExecutor {
   private readonly maxRetries: number
   private readonly defaultTimeoutMs: number
   private readonly screenshotDir: string
+  private readonly resolver: ElementResolver
+  private readonly resolverMemory?: ResolverMemory
 
   constructor(
     private readonly page: Page,
@@ -109,35 +68,22 @@ export class BrowserToolExecutor {
     this.maxRetries = config.maxRetries ?? 3
     this.defaultTimeoutMs = config.defaultTimeoutMs ?? 15_000
     this.screenshotDir = config.screenshotDir ?? './data/screenshots'
+    this.resolverMemory = config.resolverMemory
+    this.resolver = config.resolver ?? new PlaywrightElementResolver(this.resolverMemory)
   }
 
   private getToolForAction(action: ActionType): Tool | null {
     switch (action) {
       case 'navigate': return new NavigateTool(this.page)
       case 'click': return new ClickTool(this.page)
-      case 'fill': return new FillTool(this.page)
+      case 'input': return new FillTool(this.page)
       case 'screenshot': return new ScreenshotTool(this.page)
-      case 'assert': return null // Assertions are handled separately
+      case 'press':
+      case 'assert':
+        return null
     }
   }
 
-  private buildToolInput(step: StepDsl): Record<string, unknown> {
-    const base: Record<string, unknown> = {
-      timeout_ms: step.timeout_ms ?? this.defaultTimeoutMs,
-    }
-    switch (step.action) {
-      case 'navigate': return { ...base, url: step.target }
-      case 'click': return { ...base, selector: step.target }
-      case 'fill': return { ...base, selector: step.target, value: step.value ?? '' }
-      case 'screenshot': return { ...base, output_dir: this.screenshotDir, filename: step.step_id }
-      case 'assert': return base
-    }
-  }
-
-  /**
-   * Execute a single DSL step with retry logic.
-   * Returns a StepArtifact bound to step_id and the resulting transition.
-   */
   async executeStep(
     step: StepDsl,
     retryCount: number,
@@ -146,7 +92,6 @@ export class BrowserToolExecutor {
     const startedAt = new Date().toISOString()
     const timeoutMs = step.timeout_ms ?? this.defaultTimeoutMs
 
-    // Check abort before starting
     if (abortController.signal.aborted) {
       return this.makeArtifact(step, startedAt, false, {}, 'Aborted', retryCount + 1, 'fail_fast')
     }
@@ -154,28 +99,52 @@ export class BrowserToolExecutor {
     let success = false
     let evidence: Record<string, unknown> = {}
     let error: string | undefined
+    let attemptedCandidates: Candidate[] = []
+    let resolvedCandidate: Candidate | undefined
+    let healingApplied = false
 
     try {
       if (step.action === 'assert') {
-        // Assertion: local retry loop (not outer loop) — wait up to timeoutMs
-        const assertions = step.assertions ?? []
         const assertResult = await this.withTimeout(
-          runAssertions(this.page, assertions, timeoutMs),
+          this.runAssertions(step.assertions ?? [], timeoutMs),
           timeoutMs,
           `Assert step ${step.step_id} timed out`,
         )
         success = assertResult.passed
-        evidence = { assertions_checked: assertions.length }
+        evidence = { assertions_checked: (step.assertions ?? []).length }
         error = assertResult.error
-      } else {
+      } else if (step.action === 'press') {
+        const key = resolvePressKey(step.value, step.target)
+        await this.withTimeout(this.page.keyboard.press(key), timeoutMs, `Press step ${step.step_id} timed out`)
+        success = true
+        evidence = { pressed_key: key }
+      } else if (step.action === 'navigate') {
         const tool = this.getToolForAction(step.action)
         if (!tool) throw new Error(`No tool for action: ${step.action}`)
-
-        const input = this.buildToolInput(step)
-        const parsed = tool.inputSchema.safeParse(input)
-        if (!parsed.success) {
-          throw new Error(`Invalid tool input: ${parsed.error.message}`)
-        }
+        const url = inferUrlFromTarget(step.value, step.target)
+        const parsed = tool.inputSchema.safeParse({ url, timeout_ms: timeoutMs })
+        if (!parsed.success) throw new Error(`Invalid navigate input: ${parsed.error.message}`)
+        const result = await this.withTimeout(
+          tool.execute(parsed.data as Record<string, unknown>, abortController.signal),
+          timeoutMs,
+          `Tool ${step.action} timed out after ${timeoutMs}ms`,
+        )
+        success = result.success
+        evidence = result.evidence
+        error = result.error
+      } else if (isResolverAction(step.action)) {
+        const result = await this.executeResolverAction(step, timeoutMs, abortController.signal)
+        success = result.success
+        evidence = result.evidence
+        error = result.error
+        attemptedCandidates = result.attemptedCandidates
+        resolvedCandidate = result.resolvedCandidate
+        healingApplied = result.healingApplied
+      } else if (step.action === 'screenshot') {
+        const tool = this.getToolForAction(step.action)
+        if (!tool) throw new Error(`No tool for action: ${step.action}`)
+        const parsed = tool.inputSchema.safeParse({ output_dir: this.screenshotDir, filename: step.step_id, timeout_ms: timeoutMs })
+        if (!parsed.success) throw new Error(`Invalid screenshot input: ${parsed.error.message}`)
 
         const result = await this.withTimeout(
           tool.execute(parsed.data as Record<string, unknown>, abortController.signal),
@@ -192,7 +161,170 @@ export class BrowserToolExecutor {
     }
 
     const transition = this.determineTransition(success, error, retryCount)
-    return this.makeArtifact(step, startedAt, success, evidence, error, retryCount + 1, transition)
+    return this.makeArtifact(
+      step,
+      startedAt,
+      success,
+      evidence,
+      error,
+      retryCount + 1,
+      transition,
+      attemptedCandidates,
+      resolvedCandidate,
+      healingApplied,
+    )
+  }
+
+  private async executeResolverAction(
+    step: StepDsl,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<{
+    success: boolean
+    evidence: Record<string, unknown>
+    error?: string
+    attemptedCandidates: Candidate[]
+    resolvedCandidate?: Candidate
+    healingApplied: boolean
+  }> {
+    const candidates = (await this.resolver.resolve(this.page, step.target, { action: step.action, k: 3 })).candidates
+    if (candidates.length === 0) {
+      return {
+        success: false,
+        error: `No resolver candidates for target: ${step.target.key}`,
+        evidence: {},
+        attemptedCandidates: [],
+        healingApplied: false,
+      }
+    }
+
+    const attemptedCandidates: Candidate[] = []
+    let lastError: string | undefined
+    const tool = this.getToolForAction(step.action)
+
+    for (const candidate of candidates) {
+      if (signal.aborted) {
+        return {
+          success: false,
+          error: 'Aborted during candidate execution',
+          evidence: {},
+          attemptedCandidates,
+          healingApplied: false,
+        }
+      }
+
+      attemptedCandidates.push(candidate)
+
+      if (!tool) {
+        return {
+          success: false,
+          error: `No tool for resolver action: ${step.action}`,
+          evidence: {},
+          attemptedCandidates,
+          healingApplied: false,
+        }
+      }
+
+      const parsed = tool.inputSchema.safeParse({
+        candidate,
+        target_type: step.target.type,
+        value: step.value ?? '',
+        timeout_ms: timeoutMs,
+      })
+
+      if (!parsed.success) {
+        lastError = parsed.error.message
+        continue
+      }
+
+      const result = await this.withTimeout(
+        tool.execute(parsed.data as Record<string, unknown>, signal),
+        timeoutMs,
+        `Tool ${step.action} timed out after ${timeoutMs}ms`,
+      )
+
+      if (!result.success) {
+        lastError = result.error ?? 'Unknown execution failure'
+        continue
+      }
+
+      if (this.resolverMemory) {
+        await this.resolverMemory.recordSuccess(step.target.key, step.action, candidate)
+      }
+
+      return {
+        success: true,
+        evidence: result.evidence,
+        attemptedCandidates,
+        resolvedCandidate: candidate,
+        healingApplied: Boolean(this.resolverMemory),
+      }
+    }
+
+    return {
+      success: false,
+      evidence: {},
+      error: lastError ?? `Failed all resolver candidates for target: ${step.target.key}`,
+      attemptedCandidates,
+      healingApplied: false,
+    }
+  }
+
+  private async runAssertions(
+    assertions: AssertionDsl[],
+    timeoutMs: number,
+  ): Promise<{ passed: boolean; error?: string }> {
+    for (const assertion of assertions) {
+      try {
+        if (assertion.type === 'url_matches') {
+          const currentUrl = this.page.url()
+          if (!currentUrl.includes(assertion.value ?? '')) {
+            return { passed: false, error: `url_matches: \"${assertion.value}\" not found in URL \"${currentUrl}\"` }
+          }
+          continue
+        }
+
+        const { candidates } = await this.resolver.resolve(this.page, assertion.target, { action: 'assert', k: 3 })
+        if (candidates.length === 0) {
+          return { passed: false, error: `assertion_failed: no candidates for ${assertion.target.key}` }
+        }
+
+        let assertionPassed = false
+        let assertionError = 'assertion_failed: all candidates failed'
+
+        for (const candidate of candidates) {
+          const locator = this.resolver.locatorForCandidate(this.page, assertion.target, candidate)
+          try {
+            if (assertion.type === 'text_contains') {
+              const content = await locator.textContent({ timeout: timeoutMs })
+              if (content?.includes(assertion.value ?? '')) {
+                assertionPassed = true
+                break
+              }
+              assertionError = `text_contains: \"${assertion.value}\" not found in \"${content}\"`
+            } else if (assertion.type === 'element_visible') {
+              await locator.waitFor({ state: 'visible', timeout: timeoutMs })
+              assertionPassed = true
+              break
+            } else if (assertion.type === 'element_not_visible') {
+              await locator.waitFor({ state: 'hidden', timeout: timeoutMs })
+              assertionPassed = true
+              break
+            }
+          } catch (err) {
+            assertionError = `assertion_failed: ${err instanceof Error ? err.message : String(err)}`
+          }
+        }
+
+        if (!assertionPassed) {
+          return { passed: false, error: assertionError }
+        }
+      } catch (err) {
+        return { passed: false, error: `assertion_failed: ${err instanceof Error ? err.message : String(err)}` }
+      }
+    }
+
+    return { passed: true }
   }
 
   private determineTransition(
@@ -214,6 +346,9 @@ export class BrowserToolExecutor {
     error: string | undefined,
     attemptCount: number,
     transition: StepTransition,
+    attemptedCandidates?: Candidate[],
+    resolvedCandidate?: Candidate,
+    healingApplied?: boolean,
   ): StepExecutionResult {
     const artifact: StepArtifact = {
       step_id: step.step_id,
@@ -225,6 +360,25 @@ export class BrowserToolExecutor {
       error,
       attempt_count: attemptCount,
       transition,
+      ...(attemptedCandidates && attemptedCandidates.length > 0
+        ? {
+            attempted_candidates: attemptedCandidates.map(candidate => ({
+              strategy: candidate.strategy,
+              value: candidate.value,
+              score: candidate.score,
+            })),
+          }
+        : {}),
+      ...(resolvedCandidate
+        ? {
+            resolved_candidate: {
+              strategy: resolvedCandidate.strategy,
+              value: resolvedCandidate.value,
+              score: resolvedCandidate.score,
+            },
+          }
+        : {}),
+      ...(healingApplied !== undefined ? { healing_applied: healingApplied } : {}),
     }
     return { artifact, transition }
   }

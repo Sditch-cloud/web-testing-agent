@@ -7,9 +7,9 @@
 ```
 "打开 https://example.com/login，输入用户名 admin，点击登录，验证出现欢迎页面"
         ↓  TestCaseCompiler (OpenAI)
-  [navigate → fill → click → assert → screenshot]
+  [navigate → input → click → assert → screenshot]
         ↓  testLoop (有界状态机)
-  ✅ s1 navigate  ✅ s2 fill  ✅ s3 click  ✅ s4 assert  ✅ s5 screenshot
+  ✅ s1 navigate  ✅ s2 input  ✅ s3 click  ✅ s4 assert  ✅ s5 screenshot
         ↓
   📄 JSON 报告 + Markdown 摘要
 ```
@@ -273,6 +273,8 @@ npx tsx src/index.ts "..."
 
 ## DSL 格式
 
+> 迁移声明：当前版本仅支持语义目标 DSL，不再支持旧的 selector-based DSL（不兼容）。
+
 自然语言经 `TestCaseCompiler` 编译后产生以下 JSON 结构：
 
 ```json
@@ -284,41 +286,73 @@ npx tsx src/index.ts "..."
     {
       "step_id": "s1",
       "action": "navigate",
-      "target": "https://example.com/login",
+      "target": {
+        "key": "login_page",
+        "type": "page",
+        "hints": ["Login Page"],
+        "fallback": ["https://example.com/login"]
+      },
+      "value": "https://example.com/login",
       "description": "打开登录页"
     },
     {
       "step_id": "s2",
-      "action": "fill",
-      "target": "#username",
+      "action": "input",
+      "target": {
+        "key": "username",
+        "type": "input",
+        "hints": ["Username", "Email"],
+        "fallback": ["#username", "input[name=user]"]
+      },
       "value": "admin",
       "description": "输入用户名"
     },
     {
       "step_id": "s3",
-      "action": "fill",
-      "target": "#password",
+      "action": "input",
+      "target": {
+        "key": "password",
+        "type": "input",
+        "hints": ["Password"]
+      },
       "value": "123456",
       "description": "输入密码"
     },
     {
       "step_id": "s4",
       "action": "click",
-      "target": "button[type=\"submit\"]",
+      "target": {
+        "key": "login_submit",
+        "type": "button",
+        "hints": ["Login", "Sign In", "登录"]
+      },
       "description": "点击登录"
     },
     {
       "step_id": "s5",
       "action": "assert",
-      "target": "body",
+      "target": {
+        "key": "welcome_area",
+        "type": "text",
+        "hints": ["欢迎", "Welcome"]
+      },
       "assertions": [
-        { "type": "text_contains", "target": "body", "value": "欢迎" }
+        {
+          "type": "text_contains",
+          "target": {
+            "key": "welcome_area",
+            "type": "text",
+            "hints": ["欢迎", "Welcome"]
+          },
+          "value": "欢迎"
+        }
       ],
       "description": "验证欢迎页"
     },
     {
       "step_id": "s6",
       "action": "screenshot",
+      "target": { "key": "post_login", "type": "page" },
       "description": "最终截图"
     }
   ],
@@ -336,10 +370,11 @@ npx tsx src/index.ts "..."
 
 | Action | 说明 | 必填字段 |
 |--------|------|---------|
-| `navigate` | 导航到指定 URL | `target`（URL） |
-| `click` | 点击 CSS 选择器对应的元素 | `target`（CSS selector） |
-| `fill` | 向输入框填写文本 | `target`（CSS selector）、`value` |
-| `screenshot` | 截取当前页面截图 | 无 |
+| `navigate` | 导航到目标页面 | `target`（语义对象），`value`（URL） |
+| `click` | 点击语义目标元素 | `target`（语义对象） |
+| `input` | 向输入框填写文本 | `target`（语义对象）、`value` |
+| `press` | 触发键盘按键 | `target`（语义对象）、`value`（如 `Enter`） |
+| `screenshot` | 截取当前页面截图 | `target`（语义对象） |
 | `assert` | 执行断言检查 | `assertions` 数组 |
 
 ### 支持的断言类型

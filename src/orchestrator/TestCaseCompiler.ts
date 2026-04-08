@@ -52,8 +52,17 @@ const DSL_SCHEMA = {
         type: 'object',
         properties: {
           step_id: { type: 'string' },
-          action: { type: 'string', enum: ['navigate', 'click', 'fill', 'screenshot', 'assert'] },
-          target: { type: 'string' },
+          action: { type: 'string', enum: ['input', 'click', 'press', 'navigate', 'screenshot', 'assert'] },
+          target: {
+            type: 'object',
+            properties: {
+              key: { type: 'string' },
+              type: { type: 'string', enum: ['input', 'button', 'link', 'page', 'text'] },
+              hints: { type: 'array', items: { type: 'string' } },
+              fallback: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['key', 'type'],
+          },
           value: { type: 'string' },
           assertions: {
             type: 'array',
@@ -61,7 +70,16 @@ const DSL_SCHEMA = {
               type: 'object',
               properties: {
                 type: { type: 'string', enum: ['text_contains', 'url_matches', 'element_visible', 'element_not_visible'] },
-                target: { type: 'string' },
+                target: {
+                  type: 'object',
+                  properties: {
+                    key: { type: 'string' },
+                    type: { type: 'string', enum: ['input', 'button', 'link', 'page', 'text'] },
+                    hints: { type: 'array', items: { type: 'string' } },
+                    fallback: { type: 'array', items: { type: 'string' } },
+                  },
+                  required: ['key', 'type'],
+                },
                 value: { type: 'string' },
               },
               required: ['type', 'target'],
@@ -70,7 +88,7 @@ const DSL_SCHEMA = {
           timeout_ms: { type: 'number' },
           description: { type: 'string' },
         },
-        required: ['step_id', 'action'],
+        required: ['step_id', 'action', 'target'],
       },
     },
     compile_report: {
@@ -123,24 +141,26 @@ Your output MUST be a valid JSON object matching this schema:
 - url: the starting URL for the test (extract from description or use a placeholder)
 - steps: ordered array of test steps, each with:
   - step_id: "s1", "s2", etc.
-  - action: one of navigate | click | fill | screenshot | assert
-  - target: CSS selector, URL, or text pattern (required for all actions except screenshot)
-  - value: text to type (for fill), or expected value (for assert text_contains)
+  - action: one of input | click | press | navigate | screenshot | assert
+  - target: semantic object with key/type/hints/fallback (required for every step)
+  - value: text to type (for input), key to press (for press), or expected value (for assert text_contains)
   - assertions: array for assert steps, each with type, target, value
   - description: human-readable step description
 - compile_report:
   - confidence: 0.0–1.0 (how confident you are in the compilation)
-  - warnings: steps with ambiguous selectors or inferred values (non-fatal)
+  - warnings: steps with ambiguous semantic mapping or inferred values (non-fatal)
   - errors: steps that could not be resolved (fatal — these steps will fail validation)
 
 RULES:
 1. Always start with a navigate step if a URL is mentioned.
 2. Split compound actions ("login and then click checkout") into separate steps.
-3. For buttons/links without a selector, use text-based selectors like button:has-text("Login").
-4. If a selector is ambiguous, mark it with a warning and use a reasonable guess.
-5. Use step_id values "s1", "s2", etc. sequentially.
-6. Keep step descriptions in the same language as the input.
-7. Always include a final screenshot step as the last step.${hintsSection}`
+3. target.key must be semantic (e.g. "username", "login_button") and never a CSS/XPath selector.
+4. target.type must be one of input | button | link | page | text.
+5. target.hints should be an array of user-visible labels/text aliases.
+6. target.fallback is optional and should only contain resolver hints, never as primary target semantics.
+7. Use step_id values "s1", "s2", etc. sequentially.
+8. Keep step descriptions in the same language as the input.
+9. Always include a final screenshot step as the last step.${hintsSection}`
 }
 
 // ── Rule-based pre-normalization ──────────────────────────────────────────────
