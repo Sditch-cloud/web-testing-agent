@@ -279,7 +279,7 @@ export class BrowserToolExecutor {
         if (assertion.type === 'url_matches') {
           const currentUrl = this.page.url()
           if (!currentUrl.includes(assertion.value ?? '')) {
-            return { passed: false, error: `url_matches: \"${assertion.value}\" not found in URL \"${currentUrl}\"` }
+            return { passed: false, error: `url_matches: "${assertion.value}" not found in URL "${currentUrl}"` }
           }
           continue
         }

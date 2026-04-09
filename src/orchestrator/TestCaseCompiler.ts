@@ -44,6 +44,7 @@ export type CompileResult = {
 
 const DSL_SCHEMA = {
   type: 'object' as const,
+  additionalProperties: false,
   properties: {
     id: { type: 'string' },
     name: { type: 'string' },
@@ -52,89 +53,85 @@ const DSL_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
+        additionalProperties: false,
         properties: {
           step_id: { type: 'string' },
           action: { type: 'string', enum: ['input', 'click', 'press', 'navigate', 'screenshot', 'assert'] },
           target: {
             type: 'object',
+            additionalProperties: false,
             properties: {
               key: { type: 'string' },
               type: { type: 'string', enum: ['input', 'button', 'link', 'page', 'text'] },
-              hints: { type: 'array', items: { type: 'string' } },
-              fallback: { type: 'array', items: { type: 'string' } },
+              hints: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+              fallback: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
             },
-            required: ['key', 'type'],
+            required: ['key', 'type', 'hints', 'fallback'],
           },
-          value: { type: 'string' },
+          value: { anyOf: [{ type: 'string' }, { type: 'null' }] },
           assertions: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', enum: ['text_contains', 'url_matches', 'element_visible', 'element_not_visible'] },
-                target: {
+            anyOf: [
+              {
+                type: 'array',
+                items: {
                   type: 'object',
+                  additionalProperties: false,
                   properties: {
-                    key: { type: 'string' },
-                    type: { type: 'string', enum: ['input', 'button', 'link', 'page', 'text'] },
-                    hints: { type: 'array', items: { type: 'string' } },
-                    fallback: { type: 'array', items: { type: 'string' } },
+                    type: { type: 'string', enum: ['text_contains', 'url_matches', 'element_visible', 'element_not_visible'] },
+                    target: {
+                      type: 'object',
+                      additionalProperties: false,
+                      properties: {
+                        key: { type: 'string' },
+                        type: { type: 'string', enum: ['input', 'button', 'link', 'page', 'text'] },
+                        hints: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+                        fallback: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+                      },
+                      required: ['key', 'type', 'hints', 'fallback'],
+                    },
+                    value: { anyOf: [{ type: 'string' }, { type: 'null' }] },
                   },
-                  required: ['key', 'type'],
+                  required: ['type', 'target', 'value'],
                 },
-                value: { type: 'string' },
               },
-              required: ['type', 'target'],
-            },
+              { type: 'null' },
+            ],
           },
-          timeout_ms: { type: 'number' },
-          description: { type: 'string' },
+          timeout_ms: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+          description: { anyOf: [{ type: 'string' }, { type: 'null' }] },
         },
-        required: ['step_id', 'action', 'target'],
-        allOf: [
-          {
-            if: {
-              properties: {
-                action: { const: 'navigate' },
-              },
-              required: ['action'],
-            },
-            then: {
-              required: ['value'],
-              properties: {
-                value: { type: 'string', pattern: '^https?:\\/\\/.+' },
-              },
-            },
-          },
-        ],
+        required: ['step_id', 'action', 'target', 'value', 'assertions', 'timeout_ms', 'description'],
       },
     },
     compile_report: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         confidence: { type: 'number' },
         warnings: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
-              step_id: { type: 'string' },
+              step_id: { anyOf: [{ type: 'string' }, { type: 'null' }] },
               code: { type: 'string' },
               message: { type: 'string' },
             },
-            required: ['code', 'message'],
+            required: ['step_id', 'code', 'message'],
           },
         },
         errors: {
           type: 'array',
           items: {
             type: 'object',
+            additionalProperties: false,
             properties: {
-              step_id: { type: 'string' },
+              step_id: { anyOf: [{ type: 'string' }, { type: 'null' }] },
               code: { type: 'string' },
               message: { type: 'string' },
             },
-            required: ['code', 'message'],
+            required: ['step_id', 'code', 'message'],
           },
         },
       },
@@ -162,7 +159,7 @@ Your output MUST be a valid JSON object matching this schema:
   - action: one of input | click | press | navigate | screenshot | assert
   - target: semantic object with key/type/hints/fallback (required for every step)
   - value: text to type (for input), key to press (for press), absolute URL (required for navigate), or expected value (for assert text_contains)
-  - assertions: array for assert steps, each with type, target, value
+  - assertions: array for assert steps, each with type, target, value (type must be one of: text_contains | url_matches | element_visible | element_not_visible)
   - description: human-readable step description
 - compile_report:
   - confidence: 0.0–1.0 (how confident you are in the compilation)
@@ -245,11 +242,20 @@ export class TestCaseCompiler {
         ],
       })
 
-      rawOutput = response.choices[0]?.message?.content ?? ''
+      const choice = response.choices[0]
+      rawOutput = choice?.message?.content ?? ''
       usage = {
         prompt_tokens: response.usage?.prompt_tokens ?? 0,
         completion_tokens: response.usage?.completion_tokens ?? 0,
         total_tokens: response.usage?.total_tokens ?? 0,
+      }
+
+      if (choice?.finish_reason === 'length') {
+        throw new Error(
+          `LLM output was truncated (finish_reason=length). ` +
+          `Current max_tokens=${this.maxTokens}. ` +
+          `Increase COMPILE_MAX_TOKENS (e.g. 8192) or simplify the test case input.`,
+        )
       }
 
       const parsed = JSON.parse(rawOutput) as Omit<TestCaseDsl, 'compile_report'> & {
