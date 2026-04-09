@@ -76,9 +76,23 @@ export class ClickTool implements Tool<ClickInput> {
           ? 'link'
           : null
 
+    const isSelectorLike = (value: string): boolean => {
+      const v = value.trim()
+      return v.startsWith('//')
+        || v.startsWith('xpath=')
+        || v.startsWith('css=')
+        || /[#.[\]:=>~+]/.test(v)
+    }
+
     switch (input.candidate.strategy) {
       case 'label':
-        return this.page.getByLabel(input.candidate.value).first()
+        if (input.target_type === 'input') {
+          return this.page.getByLabel(input.candidate.value).first()
+        }
+        if (role) {
+          return this.page.getByRole(role, { name: input.candidate.value }).first()
+        }
+        return this.page.getByText(input.candidate.value).first()
       case 'role':
         if (role) {
           return this.page.getByRole(role, { name: input.candidate.value }).first()
@@ -87,6 +101,13 @@ export class ClickTool implements Tool<ClickInput> {
       case 'text':
         return this.page.getByText(input.candidate.value).first()
       case 'memory':
+        if (!isSelectorLike(input.candidate.value)) {
+          if (role) {
+            return this.page.getByRole(role, { name: input.candidate.value }).first()
+          }
+          return this.page.getByText(input.candidate.value).first()
+        }
+        return this.page.locator(input.candidate.value).first()
       case 'fallback':
       default:
         return this.page.locator(input.candidate.value).first()

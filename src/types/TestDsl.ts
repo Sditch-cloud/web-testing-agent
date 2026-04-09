@@ -84,7 +84,7 @@ export type CompileReport = {
 // ── Test case DSL ─────────────────────────────────────────────────────────────
 
 export type TestCaseDsl = {
-  /** Unique test case ID (e.g. "tc_abc123") */
+  /** Unique test case ID */
   id: string
   /** Human-readable test name */
   name: string

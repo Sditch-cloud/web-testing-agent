@@ -237,11 +237,17 @@ export class BrowserToolExecutor {
         continue
       }
 
-      const result = await this.withTimeout(
-        tool.execute(parsed.data as Record<string, unknown>, signal),
-        timeoutMs,
-        `Tool ${step.action} timed out after ${timeoutMs}ms`,
-      )
+      let result
+      try {
+        result = await this.withTimeout(
+          tool.execute(parsed.data as Record<string, unknown>, signal),
+          timeoutMs,
+          `Tool ${step.action} timed out after ${timeoutMs}ms (candidate: ${candidate.strategy}:${candidate.value})`,
+        )
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err)
+        continue
+      }
 
       if (!result.success) {
         lastError = result.error ?? 'Unknown execution failure'
@@ -277,9 +283,15 @@ export class BrowserToolExecutor {
     for (const assertion of assertions) {
       try {
         if (assertion.type === 'url_matches') {
-          const currentUrl = this.page.url()
-          if (!currentUrl.includes(assertion.value ?? '')) {
-            return { passed: false, error: `url_matches: "${assertion.value}" not found in URL "${currentUrl}"` }
+          const expected = assertion.value ?? ''
+          try {
+            await this.page.waitForURL(
+              current => current.toString().includes(expected),
+              { timeout: timeoutMs },
+            )
+          } catch {
+            const currentUrl = this.page.url()
+            return { passed: false, error: `url_matches: "${expected}" not found in URL "${currentUrl}"` }
           }
           continue
         }

@@ -159,4 +159,41 @@ describe('testLoop — executeTestCase', () => {
     expect((yieldedArtifacts[0] as { step_id: string }).step_id).toBe('s2')
     expect(report!.passed_steps).toBe(2) // s1 from resume + s2 just executed
   })
+
+  it('replays prerequisite state-dependent steps before resuming', async () => {
+    const { executeTestCase } = await import('../../src/orchestrator/testLoop.js')
+
+    const partialState: TestRunState = {
+      id: 'run_resume_replay_test',
+      status: 'running',
+      step_cursor: 1,
+      retry_count: 0,
+      dsl: simpleDsl,
+      artifacts: [
+        {
+          step_id: 's1',
+          tool_name: 'navigate',
+          started_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+          success: true,
+          evidence: { url: 'https://example.com' },
+          attempt_count: 1,
+          transition: 'success',
+        },
+      ],
+      started_at: new Date().toISOString(),
+    }
+
+    const generator = executeTestCase({
+      dsl: simpleDsl,
+      page: mockPage as never,
+      sessionStore: mockSessionStore as never,
+      resumeFrom: partialState,
+    })
+
+    while (!(await generator.next()).done) { /* consume */ }
+
+    // s1 (navigate) is replayed once before executing s2.
+    expect(mockGoto).toHaveBeenCalledTimes(1)
+  })
 })

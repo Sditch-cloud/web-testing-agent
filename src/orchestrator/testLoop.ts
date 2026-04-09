@@ -59,6 +59,12 @@ type LoopState = {
   globalDeadline: number
 }
 
+const STATE_DEPENDENT_ACTIONS = new Set(['navigate', 'input', 'click', 'press'])
+
+function shouldReplayForResume(step: TestCaseDsl['steps'][number]): boolean {
+  return STATE_DEPENDENT_ACTIONS.has(step.action)
+}
+
 // ── Report builder ────────────────────────────────────────────────────────────
 
 function buildReport(
@@ -158,6 +164,43 @@ export async function* executeTestCase(
     started_at: startedAt,
   }
   await sessionStore.save(runState)
+
+  // Rebuild browser state before resuming from a non-zero cursor.
+  // This prevents dependency breakage when the previous browser session is gone.
+  if (resumeFrom && loopState.stepCursor > 0) {
+    for (let replayIndex = 0; replayIndex < loopState.stepCursor; replayIndex++) {
+      const replayStep = dsl.steps[replayIndex]
+      if (!replayStep || !shouldReplayForResume(replayStep)) continue
+
+      let replayRetryCount = 0
+      while (true) {
+        const { artifact, transition } = await executor.executeStep(
+          replayStep,
+          replayRetryCount,
+          loopState.abortController,
+        )
+
+        if (transition === 'success') {
+          break
+        }
+
+        if (transition === 'retry' && replayRetryCount < maxRetries) {
+          replayRetryCount++
+          continue
+        }
+
+        runState = {
+          ...runState,
+          status: 'failed',
+          step_cursor: loopState.stepCursor,
+          failure_reason: `Resume precondition replay failed at ${replayStep.step_id}: ${artifact.error ?? 'unknown error'}`,
+          ended_at: new Date().toISOString(),
+        }
+        await sessionStore.save(runState)
+        return buildReport(runState, startedAt, runState.ended_at!)
+      }
+    }
+  }
 
   // ── Bounded step loop ──────────────────────────────────────────────────────
   // Mirrors the reference's `while (true)` but bounded by dsl.steps.length.

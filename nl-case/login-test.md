@@ -12,6 +12,4 @@ Password: admin123
 输入正确的密码
 点击“Login”按钮
 预期结果：
-登录成功
-跳转到/bank/dashboard页面
-显示用户账户信息
+登录成功并且跳转到/bank/dashboard页面
