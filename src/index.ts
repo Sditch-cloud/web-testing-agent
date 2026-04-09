@@ -24,6 +24,7 @@ const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL ?? "gpt-4o";
 const STORAGE_DIR = process.env.STORAGE_DIR ?? "./data";
+const PROXY_URL = process.env.PROXY_URL;
 const GLOBAL_TIMEOUT_MS = parseInt(
   process.env.TEST_EXECUTION_TIMEOUT_MS ?? "120000",
   10,
@@ -108,6 +109,7 @@ export async function run(options: RunOptions): Promise<void> {
       apiKey: OPENAI_API_KEY,
       model: OPENAI_MODEL,
       maxTokens: COMPILE_MAX_TOKENS,
+      proxyURL: PROXY_URL,
     });
 
     const result = await compiler.compile(resolvedNlInput);

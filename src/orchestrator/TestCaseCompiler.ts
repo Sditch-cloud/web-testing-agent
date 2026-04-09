@@ -18,6 +18,7 @@ import type {
   CompileWarning,
   CompileError,
 } from '../types/TestDsl.js'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ export type CompilerConfig = {
   model?: string
   maxTokens?: number
   /** If provided, hints are injected into the system prompt */
+  proxyURL?: string
   hints?: string[]
 }
 
