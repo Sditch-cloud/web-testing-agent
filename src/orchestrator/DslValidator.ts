@@ -22,6 +22,10 @@ const VALID_TARGET_TYPES = new Set(['input', 'button', 'link', 'page', 'text'])
 const VALID_ASSERTION_TYPES = new Set(['text_contains', 'url_matches', 'element_visible', 'element_not_visible'])
 const ASSERTIONS_REQUIRING_VALUE = new Set(['text_contains', 'url_matches'])
 
+function isHttpUrl(value: string | undefined): boolean {
+  return Boolean(value && /^https?:\/\//.test(value.trim()))
+}
+
 function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   const normalized = value
@@ -139,6 +143,18 @@ export class DslValidator {
     // press requires key value
     if (step.action === 'press' && (!step.value || step.value.trim() === '')) {
       errors.push({ ...ctx, field: 'value', code: 'MISSING_PRESS_VALUE', message: `Step ${step.step_id} (press) requires a keyboard key value` })
+    }
+
+    // navigate requires a direct step.value URL for deterministic execution
+    if (step.action === 'navigate') {
+      if (!isHttpUrl(step.value)) {
+        errors.push({
+          ...ctx,
+          field: 'value',
+          code: 'MISSING_NAVIGATE_URL',
+          message: `Step ${step.step_id} (navigate) requires value with an absolute URL (http:// or https://)`,
+        })
+      }
     }
 
     // assert requires assertions array

@@ -140,7 +140,12 @@ export async function* executeTestCase(
     globalDeadline: Date.now() + globalTimeoutMs,
   }
 
-  const executor = new BrowserToolExecutor(page, { maxRetries, screenshotDir, resolver, resolverMemory })
+  const executor = new BrowserToolExecutor(page, {
+    maxRetries,
+    screenshotDir,
+    resolver,
+    resolverMemory,
+  })
 
   // Build and persist initial run state
   let runState: TestRunState = {

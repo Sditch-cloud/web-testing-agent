@@ -59,28 +59,28 @@ describe('DslValidator', () => {
   })
 
   it('rejects step with missing target.key', () => {
-    const steps = [{ step_id: 's1', action: 'click' as const, target: { key: '', type: 'button' } }]
+    const steps = [{ step_id: 's1', action: 'click' as const, target: { key: '', type: 'button' as const } }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
     expect(result.errors.some(e => e.code === 'MISSING_TARGET_KEY')).toBe(true)
   })
 
   it('rejects assert step without assertions', () => {
-    const steps = [{ step_id: 's1', action: 'assert' as const, target: { key: 'body', type: 'text' }, assertions: [] }]
+    const steps = [{ step_id: 's1', action: 'assert' as const, target: { key: 'body', type: 'text' as const }, assertions: [] }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
     expect(result.errors.some(e => e.code === 'MISSING_ASSERTIONS')).toBe(true)
   })
 
   it('rejects assert step with text_contains but no value', () => {
-    const steps = [{ step_id: 's1', action: 'assert' as const, target: { key: 'body', type: 'text' }, assertions: [{ type: 'text_contains' as const, target: { key: 'body', type: 'text' } }] }]
+    const steps = [{ step_id: 's1', action: 'assert' as const, target: { key: 'body', type: 'text' as const }, assertions: [{ type: 'text_contains' as const, target: { key: 'body', type: 'text' as const } }] }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
     expect(result.errors.some(e => e.code === 'MISSING_ASSERTION_VALUE')).toBe(true)
   })
 
   it('rejects unknown action type', () => {
-    const steps = [{ step_id: 's1', action: 'hover' as never, target: { key: 'btn', type: 'button' } }]
+    const steps = [{ step_id: 's1', action: 'hover' as never, target: { key: 'btn', type: 'button' as const } }]
     const result = validator.validate({ ...validDsl, steps })
     expect(result.valid).toBe(false)
     expect(result.errors.some(e => e.code === 'INVALID_ACTION')).toBe(true)
@@ -92,5 +92,19 @@ describe('DslValidator', () => {
       steps: [{ step_id: 's1', action: 'click', target: { key: 'submit', type: 'button', hints: [' Login ', 'Login', ''] } }],
     })
     expect(normalized.steps[0]!.target.hints).toEqual(['Login'])
+  })
+
+  it('rejects navigate without step.value even when top-level dsl.url is valid', () => {
+    const steps = [{ step_id: 's1', action: 'navigate' as const, target: { key: 'login_page', type: 'page' as const } }]
+    const result = validator.validate({ ...validDsl, steps })
+    expect(result.valid).toBe(false)
+    expect(result.errors.some(e => e.code === 'MISSING_NAVIGATE_URL')).toBe(true)
+  })
+
+  it('accepts navigate when step.value is an absolute URL', () => {
+    const steps = [{ step_id: 's1', action: 'navigate' as const, target: { key: 'login_page', type: 'page' as const }, value: 'https://example.com/login' }]
+    const result = validator.validate({ ...validDsl, steps })
+    expect(result.valid).toBe(true)
+    expect(result.errors.some(e => e.code === 'MISSING_NAVIGATE_URL')).toBe(false)
   })
 })

@@ -89,4 +89,50 @@ describe('BrowserToolExecutor', () => {
       expect.objectContaining({ value: '[data-testid=good]' }),
     )
   })
+
+  it('navigates using step.value when action is navigate', async () => {
+    const page = createMockPage()
+    const executor = new BrowserToolExecutor(page as never, {
+      maxRetries: 0,
+    })
+
+    const step: StepDsl = {
+      step_id: 's1',
+      action: 'navigate',
+      target: {
+        key: 'login_page',
+        type: 'page',
+      },
+      value: 'https://example.com/from-step',
+    }
+
+    const { artifact, transition } = await executor.executeStep(step, 0, new AbortController())
+
+    expect(transition).toBe('success')
+    expect(artifact.success).toBe(true)
+    expect(page.goto).toHaveBeenCalledWith(
+      'https://example.com/from-step',
+      expect.objectContaining({ waitUntil: 'domcontentloaded' }),
+    )
+  })
+
+  it('fails navigate when step.value is missing and target has no url hints', async () => {
+    const page = createMockPage()
+    const executor = new BrowserToolExecutor(page as never, { maxRetries: 0 })
+
+    const step: StepDsl = {
+      step_id: 's1',
+      action: 'navigate',
+      target: {
+        key: 'login_page',
+        type: 'page',
+      },
+    }
+
+    const { artifact, transition } = await executor.executeStep(step, 0, new AbortController())
+
+    expect(transition).toBe('fail_fast')
+    expect(artifact.success).toBe(false)
+    expect(artifact.error).toContain('Unable to resolve URL')
+  })
 })

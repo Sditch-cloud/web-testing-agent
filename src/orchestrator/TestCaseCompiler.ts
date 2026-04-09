@@ -28,8 +28,8 @@ export type CompilerConfig = {
   model?: string
   maxTokens?: number
   /** If provided, hints are injected into the system prompt */
-  proxyURL?: string
   hints?: string[]
+  proxyURL?: string
 }
 
 export type CompileResult = {
@@ -91,6 +91,22 @@ const DSL_SCHEMA = {
           description: { type: 'string' },
         },
         required: ['step_id', 'action', 'target'],
+        allOf: [
+          {
+            if: {
+              properties: {
+                action: { const: 'navigate' },
+              },
+              required: ['action'],
+            },
+            then: {
+              required: ['value'],
+              properties: {
+                value: { type: 'string', pattern: '^https?:\\/\\/.+' },
+              },
+            },
+          },
+        ],
       },
     },
     compile_report: {
@@ -145,7 +161,7 @@ Your output MUST be a valid JSON object matching this schema:
   - step_id: "s1", "s2", etc.
   - action: one of input | click | press | navigate | screenshot | assert
   - target: semantic object with key/type/hints/fallback (required for every step)
-  - value: text to type (for input), key to press (for press), or expected value (for assert text_contains)
+  - value: text to type (for input), key to press (for press), absolute URL (required for navigate), or expected value (for assert text_contains)
   - assertions: array for assert steps, each with type, target, value
   - description: human-readable step description
 - compile_report:
@@ -162,7 +178,8 @@ RULES:
 6. target.fallback is optional and should only contain resolver hints, never as primary target semantics.
 7. Use step_id values "s1", "s2", etc. sequentially.
 8. Keep step descriptions in the same language as the input.
-9. Always include a final screenshot step as the last step.${hintsSection}`
+9. Always include a final screenshot step as the last step.
+10. Every navigate step MUST include value with a full absolute URL starting with http:// or https://.${hintsSection}`
 }
 
 // ── Rule-based pre-normalization ──────────────────────────────────────────────
@@ -187,7 +204,11 @@ export class TestCaseCompiler {
   private readonly hints: string[]
 
   constructor(config: CompilerConfig) {
-    this.client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })
+    this.client = new OpenAI({ 
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+      httpAgent: config.proxyURL ? new HttpsProxyAgent(config.proxyURL) : undefined,
+    })
     this.model = config.model ?? 'gpt-4o'
     this.maxTokens = config.maxTokens ?? 4096
     this.hints = config.hints ?? []
