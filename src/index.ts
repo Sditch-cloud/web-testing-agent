@@ -2,14 +2,13 @@
  * Main entry point — Web Testing Agent
  *
  * Wires together the full pipeline:
- *   NL input → compile → validate → expand → execute → report
+ *   NL input → compile → validate → execute → report
  */
 
 import 'dotenv/config'
 import { chromium } from "playwright";
 import { TestCaseCompiler } from "./orchestrator/TestCaseCompiler.js";
 import { DslValidator } from "./orchestrator/DslValidator.js";
-import { MacroExpander } from "./orchestrator/MacroExpander.js";
 import { resolveNlInput } from "./orchestrator/NlInputLoader.js";
 import { executeTestCase } from "./orchestrator/testLoop.js";
 import { PlaywrightElementResolver } from "./resolver/ElementResolver.js";
@@ -132,14 +131,8 @@ export async function run(options: RunOptions): Promise<void> {
     }
 
     // ── Validation ───────────────────────────────────────────────────────────
-    const expander = new MacroExpander();
-    const { dsl: expandedDsl, expandedCount } = expander.expand(result.dsl);
-    if (expandedCount > 0) {
-      console.log(`[INFO] Macro expander expanded ${expandedCount} step(s)`);
-    }
-
     const validator = new DslValidator();
-    const validation = validator.validate(expandedDsl);
+    const validation = validator.validate(result.dsl);
     if (!validation.valid) {
       console.error("[ERROR] DSL validation failed:");
       validation.errors.forEach((e) =>
@@ -151,7 +144,7 @@ export async function run(options: RunOptions): Promise<void> {
       validation.warnings.forEach((w) => console.warn(`  [WARN] ${w.message}`));
     }
 
-    dsl = validator.normalize(expandedDsl);
+    dsl = validator.normalize(result.dsl);
 
     // Persist DSL snapshot
     const revision = await dslStore.save(resolvedNlInput, dsl);

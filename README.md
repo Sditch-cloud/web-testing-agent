@@ -4,7 +4,7 @@ AI 驱动的 Web 测试代理，支持将自然语言测试描述编译成结构
 
 核心流程：
 
-自然语言输入 -> TestCaseCompiler -> DslValidator -> MacroExpander -> testLoop -> 报告与证据落盘
+自然语言输入 -> TestCaseCompiler -> DslValidator -> testLoop -> 报告与证据落盘
 
 ## 项目目标
 
@@ -32,7 +32,6 @@ web-testing-agent/
        BrowserToolExecutor.ts
     orchestrator/
        DslValidator.ts
-       MacroExpander.ts
        NlInputLoader.ts
        TestCaseCompiler.ts
        testLoop.ts
@@ -59,7 +58,6 @@ web-testing-agent/
         DslValidator.test.ts
         ElementResolver.test.ts
         indexInput.test.ts
-        MacroExpander.test.ts
         ResolverMemoryStore.test.ts
         testLoop.test.ts
  nl-case/
@@ -78,7 +76,6 @@ web-testing-agent/
 2. 编译与校验
 - `TestCaseCompiler` 调用 OpenAI 生成结构化 DSL。
 - `DslValidator` 检查 action、target、assertion、URL 等约束。
-- `MacroExpander` 对符合规则的高阶步骤做展开并重排 step_id。
 
 3. 执行
 - `testLoop` 以有界状态机推进步骤。
@@ -279,7 +276,6 @@ npm run lint
 - DslValidator
 - ElementResolver
 - index 输入解析
-- MacroExpander
 - ResolverMemoryStore
 - testLoop
 
